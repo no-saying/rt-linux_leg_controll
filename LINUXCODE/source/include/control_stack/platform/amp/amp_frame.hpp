@@ -21,6 +21,16 @@ struct AmpFrame {
   std::array<std::uint8_t, kAmpMaxPayload> payload{};
 };
 
+struct AmpSafetySnapshot {
+  double pitch_rad{};
+  double roll_rad{};
+  AxisVector specific_force_m_s2{};
+  bool attitude_valid{};
+  bool specific_force_valid{};
+  bool fallen{};
+  bool body_parallel{};
+};
+
 enum class AmpDecodeResult : std::uint8_t {
   Ok, Incomplete, BadSync, BadVersion, BadLength, BadCrc, BadType, BadPayload,
   StaleSequence
@@ -40,6 +50,13 @@ class AmpFrameCodec {
                                    std::uint32_t timestamp_ms, std::uint8_t* out,
                                    std::size_t capacity, std::size_t& written);
   static AmpDecodeResult decodeSensorSnapshot(const AmpFrame&, SensorFrame& out);
+  static bool encodeSafetySnapshot(const AmpSafetySnapshot& safety,
+                                   std::uint16_t sequence,
+                                   std::uint32_t timestamp_ms,
+                                   std::uint8_t* out, std::size_t capacity,
+                                   std::size_t& written);
+  static AmpDecodeResult decodeSafetySnapshot(const AmpFrame& frame,
+                                              AmpSafetySnapshot& out);
 };
 
 }  // namespace control_stack

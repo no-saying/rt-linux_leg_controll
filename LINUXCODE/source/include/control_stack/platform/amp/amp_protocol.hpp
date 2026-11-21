@@ -23,8 +23,22 @@ enum class AmpMessageType : std::uint8_t {
   TelemetryState = 0x10,
   TelemetryActuator = 0x11,
   SensorSnapshot = 0x12,
+  SafetySnapshot = 0x13,
   FaultEvent = 0x20,
   Heartbeat = 0x7f,
+};
+
+enum AmpSensorFlag : std::uint16_t {
+  SensorBodyParallel = 1U << 0,
+  SensorLegsCentered = 1U << 1,
+  SensorFallen = 1U << 2,
+  SensorEsoValid = 1U << 3,
+  SensorAttitudeValid = 1U << 4,
+  SensorImuValid = 1U << 5,
+  SensorKinematicStateValid = 1U << 6,
+  SensorJointStateValid = 1U << 7,
+  SensorWheelSpeedValid = 1U << 8,
+  SensorBodyVelocityValid = 1U << 9,
 };
 
 }

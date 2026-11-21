@@ -93,6 +93,40 @@
         "torque_nm": 5.0
       },
       "feedback_publish_hz": 500
+    },
+    {
+      "number": 5,
+      "family": "dji",
+      "model": "M3508",
+      "bus": 1,
+      "can_id": 1,
+      "feedback_id": 513,
+      "offline_ms": 20,
+      "mit_period_ms": 1,
+      "native_period_ms": 1,
+      "expected_feedback_hz": 1000,
+      "control_limits": {
+        "velocity_rad_s": 45.0,
+        "torque_nm": 3.0
+      },
+      "feedback_publish_hz": 500
+    },
+    {
+      "number": 6,
+      "family": "dji",
+      "model": "M3508",
+      "bus": 1,
+      "can_id": 2,
+      "feedback_id": 514,
+      "offline_ms": 20,
+      "mit_period_ms": 1,
+      "native_period_ms": 1,
+      "expected_feedback_hz": 1000,
+      "control_limits": {
+        "velocity_rad_s": 45.0,
+        "torque_nm": 3.0
+      },
+      "feedback_publish_hz": 500
     }
   ]
 }

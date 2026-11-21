@@ -28,7 +28,10 @@ class ThreeNmpcControlAlgorithm final : public IControlAlgorithm {
   ControlSelection selection_{};
   double nominal_period_s_;
   std::uint64_t last_timestamp_us_{};
+  double elapsed_since_solve_s_{};
+  double schedule_phase_s_{};
   bool have_timestamp_{false};
+  bool nmpc_due_{false};
 };
 
 }  // namespace control_stack

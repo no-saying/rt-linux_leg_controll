@@ -59,7 +59,7 @@ int main() {
   };
   check(checks,AmpFrameCodec::encodeCommand(input,7,100,wire,sizeof(wire),wire_size),"encode AMP setpoint");
   check(checks,runtime.ingestAmpBytes(wire,wire_size,100000)==AmpDecodeResult::Ok,"AMP decode and accept");
-  check(checks,!runtime.tick().valid,"hold output until AMP sensor snapshot arrives");
+  check(checks,!runtime.tick(100000).valid,"hold output until AMP sensor snapshot arrives");
   wire[wire_size-1]^=0x01;
   check(checks,runtime.ingestAmpBytes(wire,wire_size,100500)==AmpDecodeResult::BadCrc,"reject CRC-corrupted AMP frame");
   wire[wire_size-1]^=0x01;
@@ -68,7 +68,7 @@ int main() {
   check(checks,runtime.ingestAmpBytes(sensor_wire,sensor_wire_size,100800)==AmpDecodeResult::BadCrc,"reject corrupted sensor frame");
   sensor_wire[sensor_wire_size-2]^=0x40;
   check(checks,send_sensor(1,101000),"AMP sensor snapshot decode");
-  auto output=runtime.tick();
+  auto output=runtime.tick(101000);
   check(checks,output.valid&&control.calls==1,"application to controller cycle");
   check(checks,std::abs(runtime.command().x_speed_m_s-0.35)<0.001&&std::abs(runtime.command().z_speed_m_s-8.0)<0.01,"binary16 command values decoded");
   check(checks,control.saw_perception,"perception state reaches controller input");
@@ -80,31 +80,59 @@ int main() {
   AmpFrameCodec::encodeCommand(input,8,102,wire,sizeof(wire),wire_size);
   runtime.ingestAmpBytes(wire,wire_size,102000);
   check(checks,send_sensor(2,103000),"refresh AMP sensor before ESTOP");
-  output=runtime.tick();
+  output=runtime.tick(103000);
   check(checks,!output.valid&&runtime.status().state==RobotState::Fault,"ESTOP suppresses control output");
 
   input.vehicle_state=1;
   AmpFrameCodec::encodeCommand(input,9,104,wire,sizeof(wire),wire_size);
   runtime.ingestAmpBytes(wire,wire_size,104000);
   send_sensor(3,104500);
-  runtime.tick();
+  runtime.tick(104500);
   check(checks,runtime.status().state==RobotState::Fault,"fault remains latched after enable command");
   runtime.clearFault();
   input.vehicle_state=1;input.motion_state=4;
   AmpFrameCodec::encodeCommand(input,10,105,wire,sizeof(wire),wire_size);
   runtime.ingestAmpBytes(wire,wire_size,105000);
   sensor.body_parallel=true;
-  send_sensor(4,106000);runtime.tick();
-  send_sensor(5,107000);runtime.tick();
-  check(checks,runtime.status().recovery_stage==RecoveryStage::FoldLegs,"recovery stage: body parallel to fold");
-  sensor.leg_height_m=0.07;send_sensor(6,108000);runtime.tick();
-  check(checks,runtime.status().recovery_stage==RecoveryStage::MoveLegsToCenter,"recovery stage: fold to center");
-  sensor.legs_centered=true;send_sensor(7,109000);runtime.tick();
+  send_sensor(4,106000);runtime.tick(106000);
+  send_sensor(5,107000);runtime.tick(107000);
+  check(checks,runtime.status().recovery_stage==RecoveryStage::MoveLegsToCenter,"recovery stage: body parallel to centering");
+  sensor.leg_height_m=0.07;send_sensor(6,108000);runtime.tick(108000);
+  check(checks,runtime.status().recovery_stage==RecoveryStage::MoveLegsToCenter,"recovery holds centering until confirmed");
+  sensor.legs_centered=true;send_sensor(7,109000);runtime.tick(109000);
   check(checks,runtime.status().recovery_stage==RecoveryStage::BalanceHandoff,"recovery stage: center to balance handoff");
 
   send_sensor(8,200000);
-  output=runtime.tick();
+  output=runtime.tick(200000);
   check(checks,!output.valid&&runtime.status().state==RobotState::Disabled,"command timeout enters disabled state");
+
+  input.motion_state=0;
+  AmpFrameCodec::encodeCommand(input,11,201,wire,sizeof(wire),wire_size);
+  runtime.ingestAmpBytes(wire,wire_size,201000);
+  check(checks,send_sensor(9,202000),"refresh AMP sensor for timeout checks");
+  output=runtime.tick(202000);
+  check(checks,output.valid,"fresh command and sensor restore control");
+
+  AmpFrameCodec::encodeCommand(input,12,251,wire,sizeof(wire),wire_size);
+  runtime.ingestAmpBytes(wire,wire_size,251000);
+  output=runtime.tick(252001);
+  check(checks,!output.valid&&runtime.status().state==RobotState::Disabled,
+        "frozen sensor stream expires against local monotonic time");
+
+  check(checks,send_sensor(10,253000),"refresh sensor after sensor timeout");
+  output=runtime.tick(253000);
+  check(checks,output.valid,"fresh streams restore control after sensor timeout");
+  output=runtime.tick(301001);
+  check(checks,!output.valid&&runtime.status().state==RobotState::Disabled,
+        "frozen command stream expires against local monotonic time");
+
+  input.vehicle_state=1;
+  AmpFrameCodec::encodeCommand(input,13,302,wire,sizeof(wire),wire_size);
+  runtime.ingestAmpBytes(wire,wire_size,302000);
+  check(checks,send_sensor(11,303000),"refresh sensor before age-boundary checks");
+  check(checks,runtime.tick(308000).valid,"accept sensor data at the 5 ms age limit");
+  check(checks,!runtime.tick(308001).valid,"inhibit control when sensor data exceeds 5 ms");
+
   MessageCenter messages{};FaultEvent fault{201000,0x55,2},read_fault{};
   check(checks,messages.publishFault(fault)&&messages.pollFault(read_fault)&&read_fault.code==0x55,"static message center fault topic");
   StaticLogBuffer<4> logs{};LogRecord record{LogLevel::Info,201000,"test","static ring"};

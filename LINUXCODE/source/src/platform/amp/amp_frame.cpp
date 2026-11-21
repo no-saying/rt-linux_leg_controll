@@ -1,4 +1,5 @@
 #include "control_stack/platform/amp/amp_frame.hpp"
+#include "control_stack/platform/amp/amp_protocol.hpp"
 
 #include <cmath>
 
@@ -10,8 +11,10 @@ constexpr std::uint8_t kSof1 = 0x5A;
 constexpr std::uint8_t kVersion = 1;
 constexpr std::uint8_t kCommand = 0x01;
 constexpr std::uint8_t kSensorSnapshot = 0x12;
+constexpr std::uint8_t kSafetySnapshot = 0x13;
 constexpr std::uint16_t kCommandPayloadSize = 16;
 constexpr std::uint16_t kSensorPayloadSize = 82;
+constexpr std::uint16_t kSafetyPayloadSize = 12;
 
 void put16(std::uint8_t* p, std::uint16_t value) {
   p[0] = static_cast<std::uint8_t>(value & 0xffU);
@@ -236,10 +239,17 @@ bool AmpFrameCodec::encodeSensorSnapshot(const SensorFrame& sensor,
   for (double value : sensor.eso_disturbance)
     if (!putHalf(frame.payload, offset, value)) return false;
 
-  const std::uint16_t flags = (sensor.body_parallel ? 1U : 0U) |
-                              (sensor.legs_centered ? 2U : 0U) |
-                              (sensor.fallen ? 4U : 0U) |
-                              (sensor.eso_valid ? 8U : 0U);
+  const std::uint16_t flags =
+      (sensor.body_parallel ? SensorBodyParallel : 0U) |
+      (sensor.legs_centered ? SensorLegsCentered : 0U) |
+      (sensor.fallen ? SensorFallen : 0U) |
+      (sensor.eso_valid ? SensorEsoValid : 0U) |
+      (sensor.attitude_valid ? SensorAttitudeValid : 0U) |
+      (sensor.imu_valid ? SensorImuValid : 0U) |
+      (sensor.kinematic_state_valid ? SensorKinematicStateValid : 0U) |
+      (sensor.joint_state_valid ? SensorJointStateValid : 0U) |
+      (sensor.wheel_speed_valid ? SensorWheelSpeedValid : 0U) |
+      (sensor.body_velocity_valid ? SensorBodyVelocityValid : 0U);
   put16(frame.payload.data() + offset, flags);
   return encode(frame, out, capacity, written);
 }
@@ -269,11 +279,18 @@ AmpDecodeResult AmpFrameCodec::decodeSensorSnapshot(const AmpFrame& frame,
   for (double& value : decoded.eso_disturbance) value = read_half();
 
   const auto flags = get16(frame.payload.data() + offset);
-  if (flags & ~std::uint16_t(15)) return AmpDecodeResult::BadPayload;
-  decoded.body_parallel = (flags & 1U) != 0;
-  decoded.legs_centered = (flags & 2U) != 0;
-  decoded.fallen = (flags & 4U) != 0;
-  decoded.eso_valid = (flags & 8U) != 0;
+  constexpr std::uint16_t kKnownFlags = (1U << 10) - 1U;
+  if (flags & ~kKnownFlags) return AmpDecodeResult::BadPayload;
+  decoded.body_parallel = (flags & SensorBodyParallel) != 0;
+  decoded.legs_centered = (flags & SensorLegsCentered) != 0;
+  decoded.fallen = (flags & SensorFallen) != 0;
+  decoded.eso_valid = (flags & SensorEsoValid) != 0;
+  decoded.attitude_valid = (flags & SensorAttitudeValid) != 0;
+  decoded.imu_valid = (flags & SensorImuValid) != 0;
+  decoded.kinematic_state_valid = (flags & SensorKinematicStateValid) != 0;
+  decoded.joint_state_valid = (flags & SensorJointStateValid) != 0;
+  decoded.wheel_speed_valid = (flags & SensorWheelSpeedValid) != 0;
+  decoded.body_velocity_valid = (flags & SensorBodyVelocityValid) != 0;
 
   auto all_finite = [](const auto& values) {
     for (double value : values)
@@ -288,6 +305,55 @@ AmpDecodeResult AmpFrameCodec::decodeSensorSnapshot(const AmpFrame& frame,
       !std::isfinite(decoded.leg_height_m))
     return AmpDecodeResult::BadPayload;
 
+  out = decoded;
+  return AmpDecodeResult::Ok;
+}
+
+bool AmpFrameCodec::encodeSafetySnapshot(const AmpSafetySnapshot& safety,
+                                         std::uint16_t sequence,
+                                         std::uint32_t timestamp_ms,
+                                         std::uint8_t* out,
+                                         std::size_t capacity,
+                                         std::size_t& written) {
+  AmpFrame frame{};
+  frame.type = kSafetySnapshot;
+  frame.sequence = sequence;
+  frame.timestamp_ms = timestamp_ms;
+  frame.payload_size = kSafetyPayloadSize;
+  std::size_t offset = 0;
+  if (!putHalf(frame.payload, offset, safety.pitch_rad) ||
+      !putHalf(frame.payload, offset, safety.roll_rad))
+    return false;
+  for (double value : safety.specific_force_m_s2)
+    if (!putHalf(frame.payload, offset, value)) return false;
+  const std::uint16_t flags = (safety.attitude_valid ? 1U : 0U) |
+                              (safety.fallen ? 2U : 0U) |
+                              (safety.body_parallel ? 4U : 0U) |
+                              (safety.specific_force_valid ? 8U : 0U);
+  put16(frame.payload.data() + offset, flags);
+  return encode(frame, out, capacity, written);
+}
+
+AmpDecodeResult AmpFrameCodec::decodeSafetySnapshot(
+    const AmpFrame& frame, AmpSafetySnapshot& out) {
+  if (frame.type != kSafetySnapshot) return AmpDecodeResult::BadType;
+  if (frame.flags != 0 || frame.payload_size != kSafetyPayloadSize)
+    return AmpDecodeResult::BadPayload;
+  AmpSafetySnapshot decoded{};
+  decoded.pitch_rad = fromHalf(get16(frame.payload.data()));
+  decoded.roll_rad = fromHalf(get16(frame.payload.data() + 2));
+  for (std::size_t i = 0; i < decoded.specific_force_m_s2.size(); ++i)
+    decoded.specific_force_m_s2[i] = fromHalf(get16(frame.payload.data() + 4 + i * 2));
+  const auto flags = get16(frame.payload.data() + 10);
+  if ((flags & ~std::uint16_t(15)) != 0 ||
+      !std::isfinite(decoded.pitch_rad) || !std::isfinite(decoded.roll_rad))
+    return AmpDecodeResult::BadPayload;
+  decoded.attitude_valid = (flags & 1U) != 0;
+  decoded.fallen = (flags & 2U) != 0;
+  decoded.body_parallel = (flags & 4U) != 0;
+  decoded.specific_force_valid = (flags & 8U) != 0;
+  for (double value : decoded.specific_force_m_s2)
+    if (!std::isfinite(value)) return AmpDecodeResult::BadPayload;
   out = decoded;
   return AmpDecodeResult::Ok;
 }

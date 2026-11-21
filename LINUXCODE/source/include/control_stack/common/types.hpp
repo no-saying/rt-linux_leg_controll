@@ -10,11 +10,21 @@ using JointVector = std::array<double, 6>;
 using AxisVector = std::array<double, 3>;
 
 enum class RecoveryStage : std::uint8_t {
-  Idle, SwingLegsBackward, FoldLegs, MoveLegsToCenter, BalanceHandoff, Failed
+  Idle, SwingLegsBackward, MoveLegsToCenter, BalanceHandoff, Failed
+};
+
+enum class SupportMode : std::uint8_t {
+  Unknown, Ground, Unloading, Airborne, Recontact
 };
 
 struct SensorFrame {
   std::uint64_t timestamp_us{0};
+  bool attitude_valid{false};
+  bool imu_valid{false};
+  bool kinematic_state_valid{false};
+  bool joint_state_valid{false};
+  bool wheel_speed_valid{false};
+  bool body_velocity_valid{false};
   std::array<double, 15> state{};
   AxisVector gyro{};
   AxisVector specific_force{};
@@ -27,6 +37,9 @@ struct SensorFrame {
   bool body_parallel{false};
   bool legs_centered{false};
   bool fallen{false};
+  bool support_valid{false};
+  SupportMode support{SupportMode::Unknown};
+  double support_confidence{0.0};
   AxisVector eso_disturbance{};
   bool eso_valid{false};
   std::array<bool, 2> wheel_slip{};
@@ -47,6 +60,14 @@ struct PerceptionState {
   double confidence{1.0};
   std::array<bool, 2> wheel_slip{};
   std::array<double, 2> wheel_torque_scale{{1.0, 1.0}};
+  bool attitude_valid{false};
+  bool fallen{false};
+  bool body_parallel{false};
+  bool legs_centered{false};
+  bool support_valid{false};
+  SupportMode support{SupportMode::Unknown};
+  double support_confidence{0.0};
+  double wheel_speed_residual_m_s{0.0};
 };
 
 struct GreenWavePlan {

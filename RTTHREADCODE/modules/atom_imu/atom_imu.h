@@ -49,6 +49,14 @@ struct atom_imu_sample {
     uint32_t eulr_count;
     uint32_t quat_count;
     uint32_t last_ms;     /* BSPTimeMillis() of the newest decoded frame */
+    uint32_t accel_ms;
+    uint32_t gyro_ms;
+    uint32_t eulr_ms;
+    uint32_t quat_ms;
+    uint64_t accel_us;
+    uint64_t gyro_us;
+    uint64_t eulr_us;
+    uint64_t quat_us;
     uint32_t error_count; /* rejected frames: DLC != 8 or unexpected type id */
     uint8_t  online;      /* 1 after a valid frame, until daemon expiry */
     uint32_t lost_count;  /* online -> offline transitions, excluding startup */

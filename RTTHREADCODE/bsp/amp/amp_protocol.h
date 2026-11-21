@@ -18,6 +18,7 @@ enum amp_message_type {
     AMP_MSG_COMMAND_ACK      = 0x02,
     AMP_MSG_TELEMETRY_STATE  = 0x10,
     AMP_MSG_TELEMETRY_ACTUATOR = 0x11,
+    AMP_MSG_SAFETY_SNAPSHOT  = 0x13,
     AMP_MSG_FAULT_EVENT      = 0x20,
     AMP_MSG_HEARTBEAT        = 0x7f,
 };
@@ -36,6 +37,19 @@ enum amp_motion_state {
     AMP_MOTION_JUMP       = 3,
     AMP_MOTION_RECOVERY   = 4,
     AMP_MOTION_STEP_DOWN  = 5,
+};
+
+enum amp_sensor_flag {
+    AMP_SENSOR_BODY_PARALLEL       = 1U << 0,
+    AMP_SENSOR_LEGS_CENTERED       = 1U << 1,
+    AMP_SENSOR_FALLEN              = 1U << 2,
+    AMP_SENSOR_ESO_VALID           = 1U << 3,
+    AMP_SENSOR_ATTITUDE_VALID      = 1U << 4,
+    AMP_SENSOR_IMU_VALID           = 1U << 5,
+    AMP_SENSOR_KINEMATIC_VALID     = 1U << 6,
+    AMP_SENSOR_JOINT_STATE_VALID   = 1U << 7,
+    AMP_SENSOR_WHEEL_SPEED_VALID   = 1U << 8,
+    AMP_SENSOR_BODY_VELOCITY_VALID = 1U << 9,
 };
 
 /* ACK result/reason values are part of the RT application contract. */

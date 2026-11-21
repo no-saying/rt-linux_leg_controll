@@ -49,15 +49,17 @@ private:
 };
 
 struct AxisReference4 { std::array<double,4> value{}; };
-struct AxisBlockConfig {
-    std::array<unsigned,2> motor_index{};
-    std::array<double,2> input_gain{1.,1.};
-    std::array<double,2> torque_limit{8.,8.};
-    std::array<double,2> torque_rate{250.,250.};
-};
 struct DecoupledConfig {
     EsoConfig eso{};
-    std::array<AxisBlockConfig,3> axis{};
+    // Converts each axis NMPC's two inputs to one equivalent axis effort.
+    std::array<double,6> axis_input_gain{}; // row-major [roll,pitch,yaw] x 2
+    // Maps motor torques to [roll,pitch,yaw] generalized acceleration.
+    // Columns use physical motor order LF, LR, left wheel, RF, RR, right wheel.
+    std::array<double,18> motor_effectiveness{}; // row-major 3 x 6
+    std::array<double,3> priority_weight{1.,8.,3.}; // roll, pitch, yaw
+    Torque6 motor_torque_limit{8.,8.,3.,8.,8.,3.};
+    Torque6 motor_torque_rate{250.,250.,80.,250.,250.,80.};
+    double allocation_regularization{1e-4};
     static DecoupledConfig defaults() noexcept;
 };
 using BlockNmpcCallback = int (*)(void*, DecoupledAxis, const AxisState4&,
@@ -78,8 +80,8 @@ struct DecoupledInput {
 struct DecoupledOutput {
     std::uint64_t sequence{};
     EsoState eso{};
-    std::array<AxisTorque2,3> axis_torque{};
-    Torque6 torque{};
+    std::array<AxisTorque2,3> axis_torque{}; // virtual NMPC inputs before allocation
+    Torque6 torque{};                       // allocated motor torques
 };
 
 // Three-axis nonlinear NMPC orchestration. RT-Thread owns GlobalEso and passes
@@ -123,6 +125,7 @@ private:
     BlockNmpcCallback callback_{};
     DecoupledConfig config_{};
     Torque6 previous_actual_{};
+    std::array<AxisTorque2,3> previous_axis_request_{};
     bool initialized_{};
     ParallelJob parallel_job_{};
     std::array<std::thread,3> workers_{};

@@ -1,10 +1,19 @@
 # ESO + Three-Axis NMPC
 
-This directory contains the selected roll, pitch, and yaw-wheel NMPC code and
-the three-axis controller orchestration. The application binding is
+This directory contains the roll, pitch, and yaw NMPC code and the controller
+orchestration. Each axis NMPC returns two virtual inputs. Their model input
+gains reduce them to three requested axis efforts, which a bounded weighted
+least-squares allocator maps to the six motor torques. The provisional
+effectiveness matrix uses symmetric leg and differential-wheel terms; replace
+it with identified or geometry-derived coefficients for the robot. Pitch has
+the highest allocation priority, then yaw, then roll. The allocator enforces
+per-motor torque and torque-rate bounds.
+
+The application binding is
 `control_stack/algorithms/control/three_nmpc_adapter.hpp`; it forwards the
 RT-Thread ESO disturbance estimate received in AMP `0x12` to the corresponding
-axis prediction and calls `DecoupledController::step()`.
+axis prediction and calls `DecoupledController::step()` at 100 Hz. Intermediate
+500 Hz sensor snapshots use the controller's torque-hold path.
 
 RT-Thread owns and runs Global ESO. The retained `GlobalEso` source is a porting
 reference; this application binding never updates it and never adds an ESO

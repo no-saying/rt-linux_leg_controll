@@ -26,7 +26,9 @@
 NMPC block，供 RT-Thread 交接和应用层接入参考；板端应在 RT-Thread 采集传感器
 后更新 ESO，再把传感器和 ESO 结果打进同一 `0x12` 帧。不要在本控制框架中再创建
 第二个 ESO。板端把完整 AMP 命令/传感器帧和本地单调接收时间交给
-`ControlRuntime::ingestAmpBytes`，周期调用 `tick`，再把有效的六路输出交给电机驱动。
+`ControlRuntime::ingestAmpBytes`，并在每次控制周期把当前本地单调时刻传给
+`tick(now_us)`，再把有效的六路输出交给电机驱动。不能用最后一帧的接收时间代替
+`now_us`，否则链路静止时无法检测超时。
 USB 用于其他外设，既不进入这条控制链，也不作为 AMP 承载。
 
 ## 固定内存约束

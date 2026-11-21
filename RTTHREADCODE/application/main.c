@@ -11,6 +11,7 @@
  * So here we just start application threads.
  */
 #include <rtthread.h>
+#include <math.h>
 #include <stdint.h>
 #include <string.h>
 #include "amp_ipc.h"
@@ -42,13 +43,130 @@ static uint32_t global_eso_eulr_count;
 static uint32_t global_eso_gyro_count;
 static uint64_t global_eso_last_update_us;
 static uint8_t global_eso_output_valid;
+static uint32_t safety_eulr_count;
+static uint16_t safety_sequence;
+static uint8_t safety_fallen;
+
+static uint16_t amp_crc16_update(uint16_t crc, uint8_t byte)
+{
+    unsigned int bit;
+    crc ^= (uint16_t)byte << 8;
+    for (bit = 0; bit < 8; ++bit)
+        crc = (crc & 0x8000U) ? (uint16_t)((crc << 1) ^ 0x1021U)
+                              : (uint16_t)(crc << 1);
+    return crc;
+}
+
+static uint16_t amp_float_to_half(float value)
+{
+    union { float f; uint32_t u; } bits = { .f = value };
+    uint32_t sign = (bits.u >> 16) & 0x8000U;
+    uint32_t exponent = (bits.u >> 23) & 0xffU;
+    uint32_t mantissa = bits.u & 0x7fffffU;
+    int half_exp;
+
+    if (exponent == 0xffU)
+        return (uint16_t)(sign | 0x7c00U | (mantissa ? 0x0200U : 0U));
+    half_exp = (int)exponent - 127 + 15;
+    if (half_exp >= 31)
+        return (uint16_t)(sign | 0x7c00U);
+    if (half_exp <= 0) {
+        uint32_t shifted;
+        if (half_exp < -10)
+            return (uint16_t)sign;
+        shifted = (mantissa | 0x800000U) >> (1 - half_exp);
+        return (uint16_t)(sign | ((shifted + 0x1000U) >> 13));
+    }
+    return (uint16_t)(sign | ((uint32_t)half_exp << 10) |
+                      ((mantissa + 0x1000U) >> 13));
+}
+
+static void amp_put_le16(uint8_t *p, uint16_t value)
+{
+    p[0] = (uint8_t)value;
+    p[1] = (uint8_t)(value >> 8);
+}
+
+static void amp_put_le32(uint8_t *p, uint32_t value)
+{
+    p[0] = (uint8_t)value;
+    p[1] = (uint8_t)(value >> 8);
+    p[2] = (uint8_t)(value >> 16);
+    p[3] = (uint8_t)(value >> 24);
+}
+
+/* The 0x13 message carries ATOM attitude and time-aligned specific force.
+ * The full 0x12 snapshot remains unavailable until robot kinematics and the
+ * body-velocity estimator can populate all required fields. */
+static void amp_send_safety_snapshot(void)
+{
+    enum { PAYLOAD_BYTES = 12, FRAME_BYTES = AMP_FRAME_OVERHEAD + PAYLOAD_BYTES };
+    static const float kFallEnterRad = 0.70f;
+    static const float kFallClearRad = 0.45f;
+    static const float kParallelRad = 0.14f;
+    struct atom_imu_sample sample;
+    uint8_t frame[FRAME_BYTES];
+    uint16_t crc = 0xffffU;
+    uint16_t flags;
+    float pitch, roll;
+    uint32_t i;
+    uint32_t now_ms = BSPTimeMillis();
+    uint8_t force_valid;
+    int32_t accel_eulr_delta_ms;
+
+    if (atom_imu_read(&sample) != RT_EOK || !sample.online ||
+        sample.eulr_count == 0U || sample.eulr_count == safety_eulr_count)
+        return;
+    safety_eulr_count = sample.eulr_count;
+    if ((uint32_t)(now_ms - sample.eulr_ms) > 20U)
+        return;
+    accel_eulr_delta_ms = (int32_t)(sample.eulr_ms - sample.accel_ms);
+    force_valid = sample.accel_count != 0U &&
+                  (uint32_t)(now_ms - sample.accel_ms) <= 20U &&
+                  accel_eulr_delta_ms >= -10 && accel_eulr_delta_ms <= 10;
+
+    pitch = sample.eulr[0];
+    roll = sample.eulr[1];
+    if (fabsf(pitch) >= kFallEnterRad || fabsf(roll) >= kFallEnterRad)
+        safety_fallen = 1U;
+    else if (fabsf(pitch) <= kFallClearRad && fabsf(roll) <= kFallClearRad)
+        safety_fallen = 0U;
+
+    memset(frame, 0, sizeof(frame));
+    frame[0] = AMP_SOF0;
+    frame[1] = AMP_SOF1;
+    frame[2] = AMP_PROTOCOL_VERSION;
+    frame[3] = AMP_MSG_SAFETY_SNAPSHOT;
+    amp_put_le16(frame + 4, 0U);
+    amp_put_le16(frame + 6, PAYLOAD_BYTES);
+    amp_put_le16(frame + 8, ++safety_sequence);
+    amp_put_le32(frame + 10, sample.eulr_ms);
+    amp_put_le16(frame + 14, amp_float_to_half(pitch));
+    amp_put_le16(frame + 16, amp_float_to_half(roll));
+    amp_put_le16(frame + 18, amp_float_to_half(
+        force_valid ? sample.accel[0] * 9.80665f : 0.0f));
+    amp_put_le16(frame + 20, amp_float_to_half(
+        force_valid ? sample.accel[1] * 9.80665f : 0.0f));
+    amp_put_le16(frame + 22, amp_float_to_half(
+        force_valid ? sample.accel[2] * 9.80665f : 0.0f));
+    flags = 1U | (safety_fallen ? 2U : 0U) |
+            ((fabsf(pitch) <= kParallelRad && fabsf(roll) <= kParallelRad)
+                 ? 4U : 0U) | (force_valid ? 8U : 0U);
+    amp_put_le16(frame + 24, flags);
+    for (i = 2; i < 26; ++i)
+        crc = amp_crc16_update(crc, frame[i]);
+    amp_put_le16(frame + 26, crc);
+    (void)amp_ipc_send(frame, sizeof(frame));
+}
 
 static void amp_update_global_eso(void)
 {
     struct atom_imu_sample sample;
     struct global_eso_measurement measurement;
     uint64_t now_us = DWT_GetTimeline_us();
+    uint64_t sample_delta_us;
     double dt;
+    uint8_t new_eulr, new_gyro;
 
     if (atom_imu_read(&sample) != RT_EOK || !sample.online ||
         sample.eulr_count == 0U || sample.gyro_count == 0U) {
@@ -57,8 +175,9 @@ static void amp_update_global_eso(void)
         global_eso_output_valid = 0U;
         return;
     }
-    if (sample.eulr_count == global_eso_eulr_count ||
-        sample.gyro_count == global_eso_gyro_count) {
+    new_eulr = sample.eulr_count != global_eso_eulr_count;
+    new_gyro = sample.gyro_count != global_eso_gyro_count;
+    if (!new_eulr || !new_gyro) {
         if (global_eso_last_update_us != 0U &&
             now_us - global_eso_last_update_us > 20000U) {
             global_eso_reset(&global_eso, RT_NULL, RT_NULL);
@@ -70,10 +189,32 @@ static void amp_update_global_eso(void)
 
     global_eso_eulr_count = sample.eulr_count;
     global_eso_gyro_count = sample.gyro_count;
+    sample_delta_us = sample.eulr_us >= sample.gyro_us
+                          ? sample.eulr_us - sample.gyro_us
+                          : sample.gyro_us - sample.eulr_us;
+    if (sample_delta_us > 5000U || sample.eulr_us == 0U ||
+        sample.gyro_us == 0U || sample.eulr_us > now_us ||
+        sample.gyro_us > now_us || now_us - sample.eulr_us > 20000U ||
+        now_us - sample.gyro_us > 20000U ||
+        (global_eso_last_update_us != 0U &&
+         sample.eulr_us <= global_eso_last_update_us)) {
+        if (global_eso_last_update_us != 0U &&
+            now_us - global_eso_last_update_us > 20000U) {
+            global_eso_reset(&global_eso, RT_NULL, RT_NULL);
+            global_eso_last_update_us = 0U;
+            global_eso_output_valid = 0U;
+        }
+        return;
+    }
     dt = global_eso_last_update_us == 0U
              ? 0.005
-             : (double)(now_us - global_eso_last_update_us) / 1000000.0;
-    global_eso_last_update_us = now_us;
+             : (double)(sample.eulr_us - global_eso_last_update_us) / 1000000.0;
+    if (dt <= 0.0 || dt > 0.02) {
+        global_eso_reset(&global_eso, RT_NULL, RT_NULL);
+        global_eso_last_update_us = 0U;
+        global_eso_output_valid = 0U;
+        return;
+    }
 
     /* ATOM reports Euler angles as pitch, roll, yaw; the observer uses
      * roll, pitch, yaw. Its model acceleration is zero until a nominal
@@ -89,9 +230,10 @@ static void amp_update_global_eso(void)
     measurement.nominal_acceleration[2] = 0.0;
 
     if (global_eso_update(&global_eso, &measurement, dt,
-                          &global_eso_output))
+                          &global_eso_output)) {
+        global_eso_last_update_us = sample.eulr_us;
         global_eso_output_valid = 1U;
-    else {
+    } else {
         global_eso_reset(&global_eso, RT_NULL, RT_NULL);
         global_eso_last_update_us = 0U;
         global_eso_output_valid = 0U;
@@ -403,8 +545,9 @@ static void periph_thread(void *param)
     rt_kprintf("[PERIPH] init start\n");
     amp_periph_init();
     global_eso_init(&global_eso, RT_NULL);
-    if (atom_imu_init(1, ATOM_IMU_F_EULR | ATOM_IMU_F_GYRO) != RT_EOK)
-        rt_kprintf("[ATOM-IMU] CAN1 EULR/GYRO register failed\n");
+    if (atom_imu_init(1, ATOM_IMU_F_ACCL | ATOM_IMU_F_EULR |
+                         ATOM_IMU_F_GYRO) != RT_EOK)
+        rt_kprintf("[ATOM-IMU] CAN1 ACCL/EULR/GYRO register failed\n");
 #ifdef AMP_CAN_LOOPBACK_TEST
     amp_run_can_loopback_tests();
 #endif
@@ -437,6 +580,7 @@ static void periph_thread(void *param)
         AMP_DIAG_SET(AMP_DIAG_PERIPH_STEP, 3);
         imu_ok = (amp_bmi088_read(&imu) == RT_EOK);
         amp_update_global_eso();
+        amp_send_safety_snapshot();
 
         tick++;
         AMP_DIAG_SET(AMP_DIAG_PERIPH, tick);

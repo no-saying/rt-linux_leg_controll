@@ -23,3 +23,16 @@ target_compile_options(three_nmpc_application_binding_test PRIVATE
   -Wall -Wextra -Wpedantic -UNDEBUG)
 add_test(NAME three_nmpc_application_binding_test
   COMMAND three_nmpc_application_binding_test)
+
+add_executable(three_nmpc_safety_snapshot_test test_safety_snapshot.cpp)
+target_link_libraries(three_nmpc_safety_snapshot_test PRIVATE
+  control_stack_application control_stack_algorithms)
+target_compile_options(three_nmpc_safety_snapshot_test PRIVATE
+  -Wall -Wextra -Wpedantic -UNDEBUG)
+add_test(NAME three_nmpc_safety_snapshot_test
+  COMMAND three_nmpc_safety_snapshot_test)
+
+add_executable(three_nmpc_timing_bench board_timing_bench.cpp)
+target_link_libraries(three_nmpc_timing_bench PRIVATE
+  control_stack_application control_stack_algorithms eso_three_nmpc)
+target_compile_options(three_nmpc_timing_bench PRIVATE -Wall -Wextra -Wpedantic)

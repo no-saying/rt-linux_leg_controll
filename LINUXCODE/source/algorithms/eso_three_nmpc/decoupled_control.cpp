@@ -22,8 +22,139 @@ bool valid_esoconfig(const EsoConfig& c) noexcept {
 }
 bool valid_config(const DecoupledConfig& c) noexcept {
     if(!valid_esoconfig(c.eso))return false;
-    bool used[6]={};for(const auto& a:c.axis){for(unsigned j=0;j<2;++j){if(a.motor_index[j]>=6||used[a.motor_index[j]]||!std::isfinite(a.input_gain[j])||std::abs(a.input_gain[j])<1e-8||!std::isfinite(a.torque_limit[j])||a.torque_limit[j]<=0.||!std::isfinite(a.torque_rate[j])||a.torque_rate[j]<=0.)return false;used[a.motor_index[j]]=true;}}
+    if(!finite(c.axis_input_gain)||!finite(c.motor_effectiveness)||
+       !finite(c.priority_weight)||!finite(c.motor_torque_limit)||
+       !finite(c.motor_torque_rate)||!std::isfinite(c.allocation_regularization)||
+       c.allocation_regularization<=0.)return false;
+    for(unsigned axis=0;axis<3;++axis) {
+        if(c.priority_weight[axis]<=0.)return false;
+        double row_norm=0.;
+        for(unsigned motor=0;motor<6;++motor) {
+            const double value=c.motor_effectiveness[axis*6+motor];
+            row_norm+=value*value;
+            if(c.motor_torque_limit[motor]<=0.||c.motor_torque_rate[motor]<=0.)return false;
+        }
+        if(row_norm<1e-12||std::abs(c.axis_input_gain[axis*2])+std::abs(c.axis_input_gain[axis*2+1])<1e-8)return false;
+    }
     return true;
+}
+bool solve_linear(double matrix[6][6],double rhs[6],unsigned n) noexcept {
+    for(unsigned column=0;column<n;++column) {
+        unsigned pivot=column;
+        for(unsigned row=column+1;row<n;++row)
+            if(std::abs(matrix[row][column])>std::abs(matrix[pivot][column]))pivot=row;
+        if(std::abs(matrix[pivot][column])<1e-14)return false;
+        if(pivot!=column) {
+            for(unsigned j=column;j<n;++j)std::swap(matrix[pivot][j],matrix[column][j]);
+            std::swap(rhs[pivot],rhs[column]);
+        }
+        const double scale=matrix[column][column];
+        for(unsigned j=column;j<n;++j)matrix[column][j]/=scale;
+        rhs[column]/=scale;
+        for(unsigned row=0;row<n;++row)if(row!=column) {
+            const double factor=matrix[row][column];
+            for(unsigned j=column;j<n;++j)matrix[row][j]-=factor*matrix[column][j];
+            rhs[row]-=factor*rhs[column];
+        }
+    }
+    return true;
+}
+bool allocate_motor_torque(const DecoupledConfig& config,
+                           const std::array<AxisTorque2,3>& axis_input,
+                           const Torque6& previous,double dt,
+                           Torque6& output) noexcept {
+    if(!finite(previous)||!std::isfinite(dt)||dt<=0.||dt>.02)return false;
+    constexpr unsigned motors=6;
+    double h[motors][motors]{};
+    double g[motors]{};
+    for(unsigned axis=0;axis<3;++axis) {
+        const double desired=config.axis_input_gain[axis*2]*axis_input[axis].value[0]+
+                             config.axis_input_gain[axis*2+1]*axis_input[axis].value[1];
+        const double weight=config.priority_weight[axis];
+        if(!std::isfinite(desired))return false;
+        for(unsigned i=0;i<motors;++i) {
+            const double bi=config.motor_effectiveness[axis*motors+i];
+            g[i]+=weight*bi*desired;
+            for(unsigned j=0;j<motors;++j)
+                h[i][j]+=weight*bi*config.motor_effectiveness[axis*motors+j];
+        }
+    }
+    const double regularization=config.allocation_regularization;
+    double lower[motors]{},upper[motors]{};
+    for(unsigned i=0;i<motors;++i) {
+        h[i][i]+=regularization;
+        g[i]+=regularization*previous[i];
+        lower[i]=std::max(-config.motor_torque_limit[i],
+                          previous[i]-config.motor_torque_rate[i]*dt);
+        upper[i]=std::min(config.motor_torque_limit[i],
+                          previous[i]+config.motor_torque_rate[i]*dt);
+    }
+
+    // Most cycles do not hit actuator bounds. Solve the unconstrained QP once
+    // and return immediately when it is feasible; only saturated cycles need
+    // the exhaustive active-set fallback below.
+    {
+        double unconstrained[6][6]{},rhs[6]{};
+        for(unsigned i=0;i<motors;++i) {
+            rhs[i]=g[i];
+            for(unsigned j=0;j<motors;++j)unconstrained[i][j]=h[i][j];
+        }
+        if(solve_linear(unconstrained,rhs,motors)) {
+            bool feasible=true;
+            for(unsigned i=0;i<motors;++i)
+                if(rhs[i]<lower[i]-1e-8||rhs[i]>upper[i]+1e-8)feasible=false;
+            if(feasible) {
+                for(unsigned i=0;i<motors;++i)output[i]=std::clamp(rhs[i],lower[i],upper[i]);
+                return finite(output);
+            }
+        }
+    }
+
+    // Six actuators make exhaustive lower/free/upper active-set enumeration
+    // small (3^6 cases) and deterministic, while satisfying the box QP KKT
+    // conditions exactly up to floating-point tolerance.
+    constexpr unsigned cases=729;
+    double best_cost=std::numeric_limits<double>::infinity();
+    bool found=false;
+    for(unsigned code=1;code<cases;++code) {
+        unsigned state_code=code;
+        unsigned free_index[motors]{},free_count=0;
+        int state[motors]{}; // 0 free, 1 lower, 2 upper
+        Torque6 candidate{};
+        for(unsigned i=0;i<motors;++i) {
+            state[i]=static_cast<int>(state_code%3);state_code/=3;
+            if(state[i]==0)free_index[free_count++]=i;
+            else candidate[i]=state[i]==1?lower[i]:upper[i];
+        }
+        double reduced[6][6]{},rhs[6]{};
+        for(unsigned row=0;row<free_count;++row) {
+            const unsigned i=free_index[row];rhs[row]=g[i];
+            for(unsigned j=0;j<motors;++j)if(state[j]!=0)rhs[row]-=h[i][j]*candidate[j];
+            for(unsigned column=0;column<free_count;++column)
+                reduced[row][column]=h[i][free_index[column]];
+        }
+        if(free_count&&!solve_linear(reduced,rhs,free_count))continue;
+        bool feasible=true;
+        for(unsigned row=0;row<free_count;++row) {
+            const unsigned i=free_index[row];candidate[i]=rhs[row];
+            if(candidate[i]<lower[i]-1e-8||candidate[i]>upper[i]+1e-8)feasible=false;
+            candidate[i]=std::clamp(candidate[i],lower[i],upper[i]);
+        }
+        if(!feasible)continue;
+        for(unsigned i=0;i<motors;++i)if(state[i]!=0) {
+            double gradient=-g[i];
+            for(unsigned j=0;j<motors;++j)gradient+=h[i][j]*candidate[j];
+            if((state[i]==1&&gradient < -1e-7)||(state[i]==2&&gradient > 1e-7))feasible=false;
+        }
+        if(!feasible)continue;
+        double cost=0.;
+        for(unsigned i=0;i<motors;++i) {
+            cost-=g[i]*candidate[i];
+            for(unsigned j=0;j<motors;++j)cost+=.5*candidate[i]*h[i][j]*candidate[j];
+        }
+        if(cost<best_cost) {best_cost=cost;output=candidate;found=true;}
+    }
+    return found&&finite(output);
 }
 }
 GlobalEso::GlobalEso(const EsoConfig& c):config_(c){if(!configure(c))config_=EsoConfig{};reset();}
@@ -62,20 +193,34 @@ bool GlobalEso::update(const EsoMeasurement& m,double dt,EsoState& out) noexcept
     if(!finite(next.angle)||!finite(next.rate)||!finite(next.disturbance)) return false;
     state_=next; out=state_; return true;
 }
-DecoupledConfig DecoupledConfig::defaults() noexcept {DecoupledConfig c{};c.axis[0].motor_index={0,3};c.axis[1].motor_index={1,4};c.axis[2].motor_index={2,5};for(auto& a:c.axis){a.input_gain={1.,1.};a.torque_limit={8.,8.};a.torque_rate={250.,250.};}c.axis[2].torque_limit={3.,3.};c.axis[2].torque_rate={80.,80.};return c;}
+DecoupledConfig DecoupledConfig::defaults() noexcept {
+    DecoupledConfig c{};
+    c.axis_input_gain={1.8,-1.8, 1.5,-1.5, 1.2,-1.2};
+    // Initial symmetric effectiveness model in motor order LF, LR, left wheel,
+    // RF, RR, right wheel. Replace these coefficients with the robot model.
+    c.motor_effectiveness={
+         1.8, 1.8, 0.,-1.8,-1.8, 0.,
+         1.5,-1.5, 0., 1.5,-1.5, 0.,
+         0.,  0., -1.2,0.,  0.,  1.2
+    };
+    return c;
+}
 DecoupledController::DecoupledController(void* ctx,BlockNmpcCallback cb,const DecoupledConfig& c):context_(ctx),callback_(cb),config_(c){if(!callback_||!configure(c))callback_=nullptr;reset();}
 DecoupledController::~DecoupledController() {
     if(parallel_started_) {
-        parallel_stop_.store(true,std::memory_order_release);
-        parallel_generation_.fetch_add(1,std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lock(parallel_start_mutex_);
+            parallel_stop_.store(true,std::memory_order_release);
+            parallel_generation_.fetch_add(1,std::memory_order_release);
+        }
         parallel_start_cv_.notify_all();
         for(auto& worker:workers_) if(worker.joinable()) worker.join();
         parallel_started_=false;
     }
 }
 bool DecoupledController::configure(const DecoupledConfig& c) noexcept {if(parallel_started_||!callback_||!valid_config(c))return false;config_=c;return true;}
-void DecoupledController::reset() noexcept {previous_actual_={};initialized_=false;}
-bool DecoupledController::acknowledge(const Torque6& actual) noexcept {if(!finite(actual))return false;for(const auto& a:config_.axis)for(unsigned j=0;j<2;++j)if(std::abs(actual[a.motor_index[j]])>a.torque_limit[j]+1e-8)return false;previous_actual_=actual;initialized_=true;return true;}
+void DecoupledController::reset() noexcept {previous_actual_={};previous_axis_request_={};initialized_=false;}
+bool DecoupledController::acknowledge(const Torque6& actual) noexcept {if(!finite(actual))return false;for(unsigned i=0;i<6;++i)if(std::abs(actual[i])>config_.motor_torque_limit[i]+1e-8)return false;previous_actual_=actual;initialized_=true;return true;}
 bool DecoupledController::step(const DecoupledInput& in,DecoupledOutput& out) noexcept {
     if(!callback_||!std::isfinite(in.dt)||in.dt<=0.||in.dt>.02) return false;
     const double control_dt=in.nmpc_dt>0.?in.nmpc_dt:in.dt;
@@ -85,25 +230,21 @@ bool DecoupledController::step(const DecoupledInput& in,DecoupledOutput& out) no
     DecoupledOutput next{}; next.sequence=in.sequence; next.eso=estimate;
     if(!in.run_nmpc) {
         next.torque=previous_actual_;
-        for(unsigned axis=0;axis<3;++axis) for(unsigned j=0;j<2;++j)
-            next.axis_torque[axis].value[j]=previous_actual_[config_.axis[axis].motor_index[j]];
+        next.axis_torque=previous_axis_request_;
         out=next;
         return true;
     }
+    std::array<AxisTorque2,3> axis_input{};
     for(unsigned axis=0;axis<3;++axis) {
         AxisTorque2 block{};
         if(callback_(context_,static_cast<DecoupledAxis>(axis),in.axis_state[axis],
                      in.reference[axis],estimate.disturbance[axis],control_dt,block)!=0 ||
            !finite(block.value)) return false;
-        const auto& cfg=config_.axis[axis];
-        for(unsigned j=0;j<2;++j) {
-            double previous=previous_actual_[cfg.motor_index[j]];
-            double lo=std::max(-cfg.torque_limit[j],previous-cfg.torque_rate[j]*in.dt);
-            double hi=std::min(cfg.torque_limit[j],previous+cfg.torque_rate[j]*control_dt);
-            next.axis_torque[axis].value[j]=std::clamp(block.value[j],lo,hi);
-            next.torque[cfg.motor_index[j]]=next.axis_torque[axis].value[j];
-        }
+        axis_input[axis]=block;
     }
+    if(!allocate_motor_torque(config_,axis_input,previous_actual_,control_dt,next.torque))return false;
+    next.axis_torque=axis_input;
+    previous_axis_request_=axis_input;
     out=next; return true;
 }
 void DecoupledController::worker_loop(unsigned axis) noexcept {
@@ -142,7 +283,12 @@ void DecoupledController::worker_loop(unsigned axis) noexcept {
         }
         parallel_job_.output[axis]=block;
         parallel_job_.status[axis]=status;
-        if(parallel_completed_.fetch_add(1,std::memory_order_release)+1==3) parallel_cv_.notify_one();
+        bool all_completed=false;
+        {
+            std::lock_guard<std::mutex> lock(parallel_mutex_);
+            all_completed=parallel_completed_.fetch_add(1,std::memory_order_release)+1==3;
+        }
+        if(all_completed) parallel_cv_.notify_one();
     }
 }
 bool DecoupledController::start_parallel(const std::array<int,3>& cpu_affinity) noexcept {
@@ -159,16 +305,22 @@ bool DecoupledController::start_parallel(const std::array<int,3>& cpu_affinity) 
     try {
         for(;started<3;++started) workers_[started]=std::thread(&DecoupledController::worker_loop,this,started);
     } catch(...) {
-        parallel_stop_.store(true,std::memory_order_release);
-        parallel_generation_.fetch_add(1,std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lock(parallel_start_mutex_);
+            parallel_stop_.store(true,std::memory_order_release);
+            parallel_generation_.fetch_add(1,std::memory_order_release);
+        }
         parallel_start_cv_.notify_all();
         for(unsigned i=0;i<started;++i) if(workers_[i].joinable()) workers_[i].join();
         return false;
     }
     while(parallel_ready_.load(std::memory_order_acquire)!=3) std::this_thread::yield();
     if(!parallel_affinity_ok_.load(std::memory_order_acquire)) {
-        parallel_stop_.store(true,std::memory_order_release);
-        parallel_generation_.fetch_add(1,std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lock(parallel_start_mutex_);
+            parallel_stop_.store(true,std::memory_order_release);
+            parallel_generation_.fetch_add(1,std::memory_order_release);
+        }
         parallel_start_cv_.notify_all();
         for(auto& worker:workers_) if(worker.joinable()) worker.join();
         return false;
@@ -187,8 +339,14 @@ bool DecoupledController::finish_parallel(const DecoupledInput& input,const EsoS
     }
     parallel_job_.dt=control_dt;
     parallel_job_.sequence=input.sequence;
-    parallel_completed_.store(0,std::memory_order_relaxed);
-    parallel_generation_.fetch_add(1,std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(parallel_mutex_);
+        parallel_completed_.store(0,std::memory_order_relaxed);
+    }
+    {
+        std::lock_guard<std::mutex> lock(parallel_start_mutex_);
+        parallel_generation_.fetch_add(1,std::memory_order_release);
+    }
     parallel_start_cv_.notify_all();
     {
         std::unique_lock<std::mutex> lock(parallel_mutex_);
@@ -197,15 +355,10 @@ bool DecoupledController::finish_parallel(const DecoupledInput& input,const EsoS
     DecoupledOutput next{};next.sequence=parallel_job_.sequence;next.eso=estimate;
     for(unsigned axis=0;axis<3;++axis) {
         if(parallel_job_.status[axis]!=0) return false;
-        const auto& cfg=config_.axis[axis];
-        for(unsigned j=0;j<2;++j) {
-            double previous=previous_actual_[cfg.motor_index[j]];
-            double lo=std::max(-cfg.torque_limit[j],previous-cfg.torque_rate[j]*input.dt);
-            double hi=std::min(cfg.torque_limit[j],previous+cfg.torque_rate[j]*control_dt);
-            next.axis_torque[axis].value[j]=std::clamp(parallel_job_.output[axis].value[j],lo,hi);
-            next.torque[cfg.motor_index[j]]=next.axis_torque[axis].value[j];
-        }
+        next.axis_torque[axis]=parallel_job_.output[axis];
     }
+    if(!allocate_motor_torque(config_,next.axis_torque,previous_actual_,control_dt,next.torque))return false;
+    previous_axis_request_=next.axis_torque;
     output=next;return true;
 }
 bool DecoupledController::step_parallel(const DecoupledInput& input,DecoupledOutput& output) noexcept {
@@ -216,8 +369,7 @@ bool DecoupledController::step_parallel(const DecoupledInput& input,DecoupledOut
     if(!finite(estimate.angle)||!finite(estimate.rate)||!finite(estimate.disturbance))return false;
     if(!input.run_nmpc) {
         DecoupledOutput next{}; next.sequence=input.sequence; next.eso=estimate; next.torque=previous_actual_;
-        for(unsigned axis=0;axis<3;++axis) for(unsigned j=0;j<2;++j)
-            next.axis_torque[axis].value[j]=previous_actual_[config_.axis[axis].motor_index[j]];
+        next.axis_torque=previous_axis_request_;
         output=next;
         return true;
     }

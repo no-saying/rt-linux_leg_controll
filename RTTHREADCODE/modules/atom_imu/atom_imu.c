@@ -92,18 +92,24 @@ static void atom_imu_cb(CANInstance *inst)
         sample.accel[1] = atom_decode21(atom_field1(d), ATOM_ACCL_MIN, ATOM_ACCL_MAX);
         sample.accel[2] = atom_decode21(atom_field2(d), ATOM_ACCL_MIN, ATOM_ACCL_MAX);
         sample.accel_count++;
+        sample.accel_ms = BSPTimeMillis();
+        sample.accel_us = DWT_GetTimeline_us();
         break;
     case 1: /* gyro: x, y, z in rad/s */
         sample.gyro[0] = atom_decode21(atom_field0(d), ATOM_GYRO_MIN, ATOM_GYRO_MAX);
         sample.gyro[1] = atom_decode21(atom_field1(d), ATOM_GYRO_MIN, ATOM_GYRO_MAX);
         sample.gyro[2] = atom_decode21(atom_field2(d), ATOM_GYRO_MIN, ATOM_GYRO_MAX);
         sample.gyro_count++;
+        sample.gyro_ms = BSPTimeMillis();
+        sample.gyro_us = DWT_GetTimeline_us();
         break;
     case 3: /* eulr: pitch, roll, yaw in rad */
         sample.eulr[0] = atom_decode21(atom_field0(d), ATOM_EULR_MIN, ATOM_EULR_MAX);
         sample.eulr[1] = atom_decode21(atom_field1(d), ATOM_EULR_MIN, ATOM_EULR_MAX);
         sample.eulr[2] = atom_decode21(atom_field2(d), ATOM_EULR_MIN, ATOM_EULR_MAX);
         sample.eulr_count++;
+        sample.eulr_ms = BSPTimeMillis();
+        sample.eulr_us = DWT_GetTimeline_us();
         break;
     case 4: /* quat: w, x, y, z */
         sample.quat[0] = atom_int16_norm(atom_s16(d, 0));
@@ -111,6 +117,8 @@ static void atom_imu_cb(CANInstance *inst)
         sample.quat[2] = atom_int16_norm(atom_s16(d, 4));
         sample.quat[3] = atom_int16_norm(atom_s16(d, 6));
         sample.quat_count++;
+        sample.quat_ms = BSPTimeMillis();
+        sample.quat_us = DWT_GetTimeline_us();
         break;
     default:
         sample.error_count++;

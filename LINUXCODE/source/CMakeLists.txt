@@ -46,7 +46,9 @@ target_compile_features(control_stack_common INTERFACE cxx_std_17)
 
 add_library(control_stack_platform STATIC src/platform/amp/amp_frame.cpp)
 target_link_libraries(control_stack_platform PUBLIC control_stack_common)
-add_library(control_stack_algorithms STATIC src/algorithms/three_nmpc_adapter.cpp)
+add_library(control_stack_algorithms STATIC
+  src/algorithms/basic_robot_perception.cpp
+  src/algorithms/three_nmpc_adapter.cpp)
 target_link_libraries(control_stack_algorithms PUBLIC control_stack_common eso_three_nmpc)
 add_library(control_stack_application STATIC src/application/control_application.cpp src/application/control_runtime.cpp)
 target_link_libraries(control_stack_application PUBLIC control_stack_algorithms control_stack_platform)
@@ -63,6 +65,13 @@ if(BUILD_TESTING)
   target_link_libraries(three_nmpc_adapter_test PRIVATE control_stack_algorithms)
   target_compile_options(three_nmpc_adapter_test PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
   add_test(NAME three_nmpc_adapter_test COMMAND three_nmpc_adapter_test)
+
+  add_executable(basic_robot_perception_test
+    tests/test_basic_robot_perception.cpp)
+  target_link_libraries(basic_robot_perception_test PRIVATE control_stack_algorithms)
+  target_compile_options(basic_robot_perception_test PRIVATE
+    -Wall -Wextra -Wpedantic -UNDEBUG)
+  add_test(NAME basic_robot_perception_test COMMAND basic_robot_perception_test)
 endif()
 if(NOT MSVC)
   target_link_libraries(control_stack_platform PUBLIC m)
