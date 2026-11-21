@@ -1,0 +1,9 @@
+# Local RT-Thread build products
+build/
+*.o
+*.elf
+*.bin
+*.map
+*.asm
+.sconsign.dblite
+__pycache__/

@@ -1,0 +1,17 @@
+{
+  "schema": "p112-global-eso-three-block-v1",
+  "update_hz": 500,
+  "control_hz": 100,
+  "eso": {
+    "bandwidth_rad_s": [35.0, 35.0, 25.0],
+    "disturbance_limit_rad_s2": [30.0, 30.0, 20.0],
+    "nonlinear_alpha": 0.5,
+    "nonlinear_delta": 0.01
+  },
+  "axes": {
+    "roll": {"motor_index": [0, 3], "input_gain": [1.0, 1.0], "torque_limit_nm": [8.0, 8.0], "torque_rate_nm_s": [250.0, 250.0]},
+    "pitch": {"motor_index": [1, 4], "input_gain": [1.0, 1.0], "torque_limit_nm": [8.0, 8.0], "torque_rate_nm_s": [250.0, 250.0]},
+    "yaw": {"motor_index": [2, 5], "input_gain": [1.0, 1.0], "torque_limit_nm": [3.0, 3.0], "torque_rate_nm_s": [80.0, 80.0]}
+  },
+  "note": "Initial simulation tuning values only; validate observability, noise, saturation and delay before hardware use."
+}

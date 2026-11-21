@@ -1,0 +1,12 @@
+# Build outputs
+/build/
+**/build/
+**/__pycache__/
+*.o
+*.a
+*.so
+*.elf
+*.bin
+*.map
+*.pyc
+.sconsign.dblite

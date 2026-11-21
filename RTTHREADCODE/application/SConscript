@@ -1,0 +1,14 @@
+import os
+import subprocess
+import sys
+from building import *
+
+cwd = GetCurrentDir()
+generator = os.path.join(cwd, '../config/generate_motor_config.py')
+subprocess.check_call([sys.executable, generator])
+src = Glob('*.c')
+# ota.c is intentionally not part of the application; the existing Linux-side
+# updater owns the 0x03000000 firmware window.
+src = [s for s in src if os.path.basename(str(s)) != 'ota.c']
+group = DefineGroup('Application', src, depend=[''], CPPPATH=[cwd])
+Return('group')

@@ -1,0 +1,15 @@
+{
+  "target": "RK3568 rk3568-amp aarch64",
+  "scope": "GlobalEso update + three 4-state/2-input low-dimensional NMPC callbacks + HPIPM dense QP + compensation/limits",
+  "samples": 1000,
+  "warmup": 20,
+  "period_us": 10000,
+  "mean_us": 912.208,
+  "p50_us": 763.583,
+  "p95_us": 1277.57,
+  "p99_us": 2091.59,
+  "max_us": 8117.38,
+  "solver": "acados dense-QP adapter / HPIPM / BLASFEO ARM NEON",
+  "hardware_access": false,
+  "notes": "Offline synthetic state only. Does not include sensor I/O, RL inference, CAN, actuator latency, or closed-loop stability. Default axis A/B matrices are simulation tuning values and must be replaced by identified/CAD linearizations."
+}

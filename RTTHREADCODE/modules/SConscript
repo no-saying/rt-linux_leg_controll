@@ -1,0 +1,15 @@
+import os
+from building import *
+
+cwd = GetCurrentDir()
+# Only modules present in the port are collected. Keep this list explicit so
+# an empty/future module cannot become firmware by accident.
+directories = ['algorithm', 'daemon', 'motor', 'motor/DJImotor',
+               'motor/DMmotor', 'atom_imu']
+src = []
+paths = [cwd]
+for directory in directories:
+    src += Glob(os.path.join(directory, '*.c'))
+    paths.append(os.path.join(cwd, directory))
+group = DefineGroup('Modules', src, depend=[''], CPPPATH=paths)
+Return('group')

@@ -1,0 +1,47 @@
+import os
+import sys
+import rtconfig
+
+from rtconfig import RTT_ROOT
+sys.path = sys.path + [os.path.join(RTT_ROOT, 'tools')]
+from building import *
+
+TARGET = 'rtthread.' + rtconfig.TARGET_EXT
+DefaultEnvironment(tools=[])
+env = Environment(tools=['mingw'],
+    AS=rtconfig.AS, ASFLAGS=rtconfig.AFLAGS,
+    CC=rtconfig.CC, CFLAGS=rtconfig.CFLAGS,
+    CXX=rtconfig.CXX, CXXFLAGS=rtconfig.CXXFLAGS,
+    AR=rtconfig.AR, ARFLAGS='-rc',
+    LINK=rtconfig.LINK, LINKFLAGS=rtconfig.LFLAGS)
+env.PrependENVPath('PATH', rtconfig.EXEC_PATH)
+env['ASCOM'] = env['ASPPCOM']
+
+Export('RTT_ROOT')
+Export('rtconfig')
+objs = PrepareBuilding(env, RTT_ROOT, has_libcpu=False)
+
+# All include paths are local to this port or owned by the RT-Thread SDK.
+bsp_dir = Dir('#').abspath
+include_dirs = [
+    os.path.join(bsp_dir, name) for name in (
+        'application', 'modules', 'modules/algorithm', 'modules/atom_imu',
+        'modules/daemon', 'modules/motor', 'modules/motor/DJImotor',
+        'modules/motor/DMmotor', 'bsp', 'bsp/board', 'bsp/amp', 'bsp/can',
+        'bsp/dma', 'bsp/diag', 'bsp/dwt', 'bsp/log', 'bsp/periph',
+        'bsp/spi', 'bsp/usart')]
+include_dirs += [
+    os.path.join(RTT_ROOT, 'components', 'mm'),
+    os.path.join(RTT_ROOT, 'components', 'utilities'),
+    os.path.join(RTT_ROOT, 'components', 'utilities', 'avl'),
+    os.path.join(RTT_ROOT, 'components', 'utilities', 'libadt'),
+    os.path.join(RTT_ROOT, 'components', 'utilities', 'libadt', 'bitmap'),
+    os.path.join(RTT_ROOT, 'components', 'utilities', 'libadt', 'ref'),
+]
+env.Append(CPPPATH=include_dirs)
+
+# Keep the same freestanding runtime ordering as the validated RK3568 BSP.
+env.Append(LIBS=['c', 'm', 'gcc'])
+libgcc = os.popen(rtconfig.PREFIX + 'gcc -print-libgcc-file-name').read().strip()
+env.Append(LIBPATH=[os.path.dirname(libgcc)])
+DoBuilding(TARGET, objs)

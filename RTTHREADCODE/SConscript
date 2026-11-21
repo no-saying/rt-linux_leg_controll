@@ -1,0 +1,13 @@
+import os
+from building import *
+
+cwd = GetCurrentDir()
+groups = []
+# Use source-relative script names so RT-Thread's variant directory remains
+# effective; GetCurrentDir is used only to check that the source exists.
+for directory in ('application', 'modules', 'bsp'):
+    script = os.path.join(directory, 'SConscript')
+    if os.path.isfile(os.path.join(cwd, script)):
+        groups += SConscript(script)
+objs = groups
+Return('objs')

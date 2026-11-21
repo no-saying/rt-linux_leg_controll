@@ -1,0 +1,33 @@
+{
+  "schema": "p112-eso-three-block-nmpc-simulation-v1",
+  "sample_hz": 500,
+  "control_hz": 100,
+  "horizon": 18,
+  "axes": {
+    "roll": {
+      "state": ["roll", "roll_rate", "leg_diff", "leg_diff_rate"],
+      "vector_field": [0,1,0,0, -18,-2.8,0,0, 0,0,0,1, 0,0,-12,-2],
+      "input_gain": [0,0,0,0, 0,0,1.8,-1.8],
+      "state_weight": [8,1,2,0.2],
+      "input_weight": [0.08,0.08],
+      "input_limit": [8,8]
+    },
+    "pitch": {
+      "state": ["pitch", "pitch_rate", "swing_angle", "swing_rate"],
+      "vector_field": [0,1,0,0, -18,-2.8,0,0, 0,0,0,1, 0,0,-12,-2],
+      "input_gain": [0,0,0,0, 0,0, 1.5,-1.5],
+      "state_weight": [8,1,2,0.2],
+      "input_weight": [0.08,0.08],
+      "input_limit": [8,8]
+    },
+    "yaw": {
+      "state": ["yaw", "yaw_rate", "left_wheel_rate", "right_wheel_rate"],
+      "vector_field": [0,1,0,0, -10,-2,0,0, 0,0,0,1, 0,0,-7,-1.2],
+      "input_gain": [0,0,0,0, 0,0, 1.2,-1.2],
+      "state_weight": [8,1,2,0.2],
+      "input_weight": [0.08,0.08],
+      "input_limit": [3,3]
+    }
+  },
+  "note": "Simulation tuning defaults only. Replace vector_field/input_gain with identified or CAD-derived nonlinear axis parameters before any hardware integration."
+}

@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "rt_tick_ms": 1,
+  "status_hz": 1,
+  "feedback_hz": 1000,
+  "can_bitrate": 1000000,
+  "can_budget_fraction": 0.7,
+  "motors": [
+    {
+      "number": 1,
+      "family": "dm",
+      "model": "DM-J8009-2EC",
+      "bus": 2,
+      "can_id": 5,
+      "feedback_id": 21,
+      "offline_ms": 100,
+      "mit_period_ms": 2,
+      "native_period_ms": 2,
+      "expected_feedback_hz": 500,
+      "protocol_limits": {
+        "pmax": 3.14159,
+        "vmax": 45.0,
+        "tmax": 54.0
+      },
+      "control_limits": {
+        "velocity_rad_s": 1.0,
+        "torque_nm": 5.0
+      },
+      "feedback_publish_hz": 500
+    },
+    {
+      "number": 2,
+      "family": "dm",
+      "model": "DM-J8009-2EC",
+      "bus": 2,
+      "can_id": 6,
+      "feedback_id": 22,
+      "offline_ms": 100,
+      "mit_period_ms": 2,
+      "native_period_ms": 2,
+      "expected_feedback_hz": 500,
+      "protocol_limits": {
+        "pmax": 3.14159,
+        "vmax": 45.0,
+        "tmax": 54.0
+      },
+      "control_limits": {
+        "velocity_rad_s": 1.0,
+        "torque_nm": 5.0
+      },
+      "feedback_publish_hz": 500
+    },
+    {
+      "number": 3,
+      "family": "dm",
+      "model": "DM-J8009P-2EC",
+      "bus": 2,
+      "can_id": 7,
+      "feedback_id": 23,
+      "offline_ms": 100,
+      "mit_period_ms": 2,
+      "native_period_ms": 2,
+      "expected_feedback_hz": 500,
+      "protocol_limits": {
+        "pmax": 12.5,
+        "vmax": 45.0,
+        "tmax": 54.0
+      },
+      "control_limits": {
+        "velocity_rad_s": 1.0,
+        "torque_nm": 5.0
+      },
+      "feedback_publish_hz": 500
+    },
+    {
+      "number": 4,
+      "family": "dm",
+      "model": "DM-J8009P-2EC",
+      "bus": 2,
+      "can_id": 8,
+      "feedback_id": 24,
+      "offline_ms": 100,
+      "mit_period_ms": 2,
+      "native_period_ms": 2,
+      "expected_feedback_hz": 500,
+      "protocol_limits": {
+        "pmax": 12.5,
+        "vmax": 45.0,
+        "tmax": 54.0
+      },
+      "control_limits": {
+        "velocity_rad_s": 1.0,
+        "torque_nm": 5.0
+      },
+      "feedback_publish_hz": 500
+    }
+  ]
+}

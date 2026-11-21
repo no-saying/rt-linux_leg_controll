@@ -1,0 +1,8 @@
+mainmenu "RT-Thread Configuration for RK3568 AMP"
+
+config SOC_RK3568
+    bool
+    default y
+
+source "$RTT_DIR/Kconfig"
+source "$RTT_DIR/bsp/rockchip/dm/Kconfig"
